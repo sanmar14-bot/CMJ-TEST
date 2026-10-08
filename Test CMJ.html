@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CMJ · Control de fatiga</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#fff; --ink:#15181e; --muted:#667085; --line:#e3e6ec;
+  --accent:#1f6feb; --accent-ink:#fff; --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
+  --radius:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0f1115; --card:#181b21; --ink:#eef0f4; --muted:#9aa3b2; --line:#2a2f39; --accent:#4c8dff; --accent-ink:#06101f; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:18px 16px 6px;max-width:900px;margin:0 auto}
+h1{font-size:1.35rem;margin:0}
+header p{margin:2px 0 0;color:var(--muted);font-size:.9rem}
+main{max-width:900px;margin:0 auto;padding:8px 16px 48px;display:grid;gap:14px}
+section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+h2{font-size:1rem;margin:0 0 10px}
+h3{font-size:.95rem;margin:14px 0 6px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row>*{flex:0 0 auto}
+.grow{flex:1 1 160px!important}
+select,input,button{font:inherit;color:inherit}
+select,input[type=number]{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;min-height:42px}
+button{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 14px;min-height:42px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button.danger{color:var(--bad)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.stage{position:relative;background:#000;border-radius:12px;overflow:hidden;margin-top:12px;display:none}
+.stage.show{display:block}
+.stage video{display:block;width:100%;max-height:62vh;object-fit:contain;background:#000}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+.count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:6rem;font-weight:700;color:#fff;text-shadow:0 2px 12px #000}
+.status{margin-top:10px;font-size:.9rem;color:var(--muted);min-height:1.3em}
+.err{border:1px solid var(--bad);background:rgba(220,38,38,.08);border-radius:12px;padding:12px;margin-top:10px}
+.err b{color:var(--bad)}
+.err div.msg{margin:4px 0 8px;font-size:.92rem}
+.big{font-size:2.6rem;font-weight:700;line-height:1.1}
+.badge{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--muted);vertical-align:middle;margin-left:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:10px}
+.stat{background:var(--bg);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font-size:1.25rem}
+.stat span{color:var(--muted);font-size:.8rem}
+.light{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:8px;vertical-align:-1px}
+.verdict{display:flex;align-items:center;gap:6px;font-weight:600;margin-top:6px}
+.note{font-size:.85rem;color:var(--muted);margin-top:8px}
+.warn{color:var(--warn)}
+canvas.chart{width:100%;height:190px;display:block;margin-top:8px}
+#rvCanvas{width:100%;display:block;border-radius:10px;background:#000;margin-top:8px}
+#rvSlider{width:100%;margin:10px 0 4px}
+table{width:100%;border-collapse:collapse;font-size:.88rem;margin-top:10px}
+th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500}
+td button{min-height:30px;padding:2px 8px}
+details summary{cursor:pointer;font-weight:600}
+details ul{margin:8px 0 0;padding-left:18px;color:var(--muted);font-size:.9rem}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>CMJ · Control de fatiga</h1>
+  <p>Altura del salto con contramovimiento a partir del tiempo de vuelo, comparada con la línea base de cada atleta.</p>
+</header>
+<main>
+
+<section>
+  <h2>1 · Atleta</h2>
+  <div class="row">
+    <select id="athlete" class="grow" aria-label="Atleta"></select>
+    <button id="addAthlete">+ Nuevo</button>
+    <button id="editAthlete">Editar</button>
+    <button id="delAthlete" class="danger">Borrar</button>
+  </div>
+  <div class="note" id="athleteInfo"></div>
+</section>
+
+<section>
+  <h2>2 · Medir el salto</h2>
+  <div class="row">
+    <select id="facing" aria-label="Cámara">
+      <option value="environment">Cámara trasera (móvil)</option>
+      <option value="user">Webcam / cámara frontal</option>
+    </select>
+    <select id="fpsWanted" aria-label="Fotogramas por segundo">
+      <option value="60">60 fps</option>
+      <option value="120">120 fps (si el móvil puede)</option>
+      <option value="30">30 fps</option>
+    </select>
+    <button id="startCam">Activar cámara</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="rec" class="primary" disabled>● Grabar salto</button>
+    <button id="uploadBtn" type="button">Subir vídeo</button>
+    <label class="row" style="gap:6px;font-size:.88rem;color:var(--muted)">Vídeo subido:
+      <select id="slowmo" aria-label="Velocidad del vídeo subido">
+        <option value="1">velocidad normal</option>
+        <option value="2">cámara lenta ×2 (60→30 fps)</option>
+        <option value="4">cámara lenta ×4 (120→30 fps)</option>
+        <option value="8">cámara lenta ×8 (240→30 fps)</option>
+      </select>
+    </label>
+    <input id="file" type="file" accept="video/*" class="hidden">
+  </div>
+
+  <div class="stage" id="stageLive">
+    <video id="cam" playsinline muted></video>
+    <div class="count" id="count"></div>
+  </div>
+  <div class="stage" id="stagePlay">
+    <video id="play" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="status" id="status"></div>
+
+  <div class="err hidden" id="errBox" role="alert">
+    <b id="errTitle"></b>
+    <div class="msg" id="errMsg"></div>
+    <div class="row">
+      <button id="errCopy">Copiar diagnóstico</button>
+      <button id="errClose">Cerrar</button>
+    </div>
+  </div>
+
+  <details style="margin-top:10px">
+    <summary>Cómo medir bien</summary>
+    <ul>
+      <li>Móvil en trípode, <b>horizontal</b>, vista lateral, a 2–3 m, a la altura de la cadera, sin moverlo.</li>
+      <li>Se ve el cuerpo completo, pies incluidos, durante todo el salto. Fondo liso y mucha luz (con poca luz el móvil baja a 30 fps); ropa que deje ver los pies.</li>
+      <li><b>Webcam del ordenador:</b> colócala de lado (en una mesa o silla, a la altura de la cadera, sin moverla), con la persona de perfil a 2–3 m y el cuerpo entero en plano. Casi todas graban a 30 fps y bajan a 15 fps con poca luz, así que pon mucha luz; la precisión es menor que con un móvil a 120/240 fps.</li>
+      <li>Empieza quieto unos 2 s, haz el CMJ (manos en cadera) y vuelve a caer en el mismo sitio. Espera quieto 1 s tras caer.</li>
+      <li>Mismo protocolo siempre: 2–3 saltos, 30–60 s de descanso, antes del calentamiento específico y a la misma hora.</li>
+      <li><b>Más precisión:</b> graba con la app de cámara del móvil a 120/240 fps y usa «Subir vídeo». Si el vídeo se reproduce en cámara lenta (p. ej. grabado a 240 y reproducido a 30 fps), elige el factor en «Vídeo subido». La app muestra los fps reales medidos.</li>
+      <li>Tras cada análisis puedes revisar el despegue y la caída fotograma a fotograma y corregirlos a mano.</li>
+    </ul>
+  </details>
+</section>
+
+<section id="resultSec" class="hidden">
+  <h2>3 · Resultado</h2>
+  <div class="big"><span id="rH">–</span><span class="badge" id="rMethod"></span></div>
+  <div class="grid">
+    <div class="stat"><b id="rT">–</b><span>Tiempo de vuelo</span></div>
+    <div class="stat"><b id="rP">–</b><span>Resolución (1 fotograma)</span></div>
+    <div class="stat"><b id="rF">–</b><span>Fotogramas/s reales</span></div>
+    <div class="stat"><b id="rD">–</b><span>Control por desplazamiento</span></div>
+  </div>
+  <div class="note warn" id="rWarn"></div>
+  <canvas id="trace" class="chart"></canvas>
+  <div class="note">Altura del pie sobre el suelo; la zona sombreada es el vuelo.</div>
+
+  <div id="reviewBox" class="hidden">
+    <h3>Revisar fotograma a fotograma</h3>
+    <div class="note" style="margin-top:0">Busca el primer fotograma con los pies en el aire (despegue) y el primer fotograma con los pies tocando el suelo (caída). La línea discontinua es el suelo estimado.</div>
+    <canvas id="rvCanvas"></canvas>
+    <input type="range" id="rvSlider" min="0" max="0" value="0" aria-label="Fotograma">
+    <div class="note" id="rvInfo" style="margin-top:0"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="rvPrev" aria-label="Fotograma anterior">◀</button>
+      <button id="rvNext" aria-label="Fotograma siguiente">▶</button>
+      <button id="rvAir">Despegue aquí</button>
+      <button id="rvLand">Caída aquí</button>
+      <button id="rvAuto">Volver al automático</button>
+    </div>
+    <div class="note" id="rvMarks"></div>
+  </div>
+
+  <div class="row" style="margin-top:12px">
+    <button id="saveJump" class="primary">Guardar intento</button>
+    <button id="discardJump">Descartar</button>
+  </div>
+</section>
+
+<section>
+  <h2>4 · Fatiga hoy</h2>
+  <div id="fatigue"></div>
+  <canvas id="hist" class="chart"></canvas>
+  <div class="note">Cada punto es el mejor salto de una sesión. Línea discontinua: línea base.</div>
+</section>
+
+<section>
+  <h2>Historial</h2>
+  <table id="table"><thead><tr><th>Fecha</th><th>Altura</th><th>Vuelo</th><th>fps</th><th></th></tr></thead><tbody></tbody></table>
+  <div class="row" style="margin-top:12px">
+    <button id="expCsv">Exportar CSV</button>
+    <button id="expJson">Copia de seguridad (JSON)</button>
+    <button id="impJson">Restaurar copia</button>
+    <input id="fileJson" type="file" accept="application/json" class="hidden">
+  </div>
+</section>
+
+<section>
+  <h2>Ajustes</h2>
+  <div class="row">
+    <label>Amarillo si cae más de <input id="setAmber" type="number" step="0.5" min="1" max="30" style="width:80px"> %</label>
+    <label>Rojo si cae más de <input id="setRed" type="number" step="0.5" min="2" max="40" style="width:80px"> %</label>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>Modelo de pose
+      <select id="setModel"><option value="full">Completo (más preciso)</option><option value="lite">Ligero (más rápido)</option></select>
+    </label>
+    <label class="row" style="gap:6px"><input type="checkbox" id="setCpu"> Forzar CPU (si la GPU da problemas)</label>
+  </div>
+  <div class="note">Línea base = media de los 3 mejores saltos de sesión entre las últimas 8 sesiones anteriores (mínimo 3 sesiones). Los umbrales son orientativos: la herramienta ayuda a decidir, no sustituye al criterio del entrenador.</div>
+</section>
+
+</main>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const GRAV = 9.81;
+
+// <detect>
+function percentile(arr, p){
+  const s = [...arr].sort((a,b)=>a-b);
+  return s[Math.min(s.length-1, Math.max(0, Math.floor(p*(s.length-1))))];
+}
+function median5(a){
+  const n=a.length;
+  return a.map((_,i)=>{
+    const w=[]; for(let k=-2;k<=2;k++) w.push(a[Math.min(n-1,Math.max(0,i+k))]);
+    w.sort((x,y)=>x-y); return w[2];
+  });
+}
+function solve3(A,b){
+  const M=A.map((r,i)=>[...r,b[i]]);
+  for(let i=0;i<3;i++){
+    let p=i; for(let r=i+1;r<3;r++) if(Math.abs(M[r][i])>Math.abs(M[p][i])) p=r;
+    [M[i],M[p]]=[M[p],M[i]];
+    if(Math.abs(M[i][i])<1e-12) return null;
+    for(let r=0;r<3;r++){ if(r===i) continue; const f=M[r][i]/M[i][i]; for(let c=i;c<4;c++) M[r][c]-=f*M[i][c]; }
+  }
+  return [M[0][3]/M[0][0], M[1][3]/M[1][1], M[2][3]/M[2][2]];
+}
+// Ajuste y = a·x² + b·x + c con x = t - t0
+function fitQuad(ts, ys){
+  const t0=ts[0], x=ts.map(t=>t-t0);
+  const S=[0,0,0,0,0], T=[0,0,0];
+  for(let i=0;i<x.length;i++){
+    let p=1; for(let k=0;k<5;k++){ S[k]+=p; if(k<3) T[k]+=p*ys[i]; p*=x[i]; }
+  }
+  const sol=solve3([[S[4],S[3],S[2]],[S[3],S[2],S[1]],[S[2],S[1],S[0]]],[T[2],T[1],T[0]]);
+  return sol && {a:sol[0], b:sol[1], c:sol[2], t0};
+}
+function quadRoots(a,b,c){
+  const d=b*b-4*a*c; if(d<0||a===0) return null;
+  const s=Math.sqrt(d);
+  return [(-b+s)/(2*a),(-b-s)/(2*a)].sort((x,y)=>x-y);
+}
+// S: [{t (s reales), y (px, centro de los pies), nose (px) | null}]
+// Estrategia: se ajusta una parábola SOLO a la parte claramente aérea del vuelo (>35 % de la
+// altura máxima del pie), donde el ruido de la pose pesa poco, y se calcula en qué instantes
+// esa parábola corta el nivel del suelo (medido antes del despegue y después de la caída).
+function detectJump(S, vh, heightCm){
+  const n=S.length;
+  if(n<12) return {error:'Se detectó a la persona en muy pocos fotogramas ('+n+'). Comprueba que se ve el cuerpo entero, que hay buena luz y que el vídeo no es muy corto.'};
+  const t=S.map(s=>s.t), yRaw=S.map(s=>s.y), y=median5(yRaw);
+  const dts=[]; for(let k=1;k<n;k++) dts.push(t[k]-t[k-1]);
+  const dtMin=percentile(dts,0.25), dtOk=dts.filter(d=>d<=1.5*dtMin), dt=dtOk.reduce((a,b)=>a+b,0)/dtOk.length;
+  const G0=percentile(y,0.9);
+  const spans=[];
+  S.forEach((s,i)=>{ if(s.nose!=null && y[i]>=G0-0.012*vh) spans.push(y[i]-s.nose); });
+  const bodyPx = spans.length>5 ? percentile(spans,0.85)/0.91 : 0.5*vh;
+  const up=y.map(v=>G0-v);
+  let k=0; for(let i=1;i<n;i++) if(up[i]>up[k]) k=i;
+  const peak=up[k];
+  if(peak<Math.max(0.03*bodyPx,4)) return {error:'No se aprecia ningún despegue: los pies no se separan del suelo en el vídeo.', G0, bodyPx};
+  const region=frac=>{ let i1=k,i2=k; while(i1>0&&up[i1-1]>frac*peak) i1--; while(i2<n-1&&up[i2+1]>frac*peak) i2++; return [i1,i2]; };
+  let [i1,i2]=region(0.35);
+  if(i2-i1+1<5) [i1,i2]=region(0.15);
+  if(i1===0||i2===n-1) return {error:'El vídeo empieza o termina con la persona en el aire. Graba unos segundos antes y después del salto.', G0, bodyPx};
+  if(i2-i1+1<4) return {error:'El vuelo aparece en muy pocos fotogramas. Graba a más fps.', G0, bodyPx};
+
+  let idx=[]; for(let i=i1;i<=i2;i++) idx.push(i);
+  let f=null, rms=0;
+  for(let it=0; it<2; it++){
+    const ts=idx.map(i=>t[i]), ys=idx.map(i=>G0-yRaw[i]);
+    f=fitQuad(ts,ys); if(!f) break;
+    const res=ys.map((v,j)=>{ const x=ts[j]-f.t0; return v-(f.a*x*x+f.b*x+f.c); });
+    rms=Math.sqrt(res.reduce((s,r)=>s+r*r,0)/res.length);
+    if(it===0){
+      const lim=Math.max(2.5*rms,2);
+      const keep=idx.filter((_,j)=>Math.abs(res[j])<=lim);
+      if(keep.length>=4 && keep.length<idx.length) idx=keep; else break;
+    }
+  }
+  if(!f||!(f.a<0)) return {error:'No se pudo ajustar la trayectoria del vuelo. Revisa el encuadre y repite.', G0, bodyPx};
+  const r0=quadRoots(f.a,f.b,f.c);
+  if(!r0) return {error:'No se pudo ajustar la trayectoria del vuelo. Revisa el encuadre y repite.', G0, bodyPx};
+  const takeoff0=f.t0+r0[0], land0=f.t0+r0[1];
+
+  const med=(lo,hi)=>{ const v=[]; for(let i=0;i<n;i++) if(t[i]>=lo&&t[i]<=hi) v.push(y[i]); return v.length>=3?percentile(v,0.5):null; };
+  const okG=g=>g!=null&&Math.abs(g-G0)<=0.06*bodyPx;
+  let gPre=med(takeoff0-1.0,takeoff0-0.30), gPost=med(land0+0.30,land0+1.0);
+  if(!okG(gPre)) gPre=G0;
+  if(!okG(gPost)) gPost=G0;
+  const rt=quadRoots(f.a,f.b,f.c-(G0-gPre)), rl=quadRoots(f.a,f.b,f.c-(G0-gPost));
+  const tTake = rt ? f.t0+rt[0] : takeoff0;
+  const tLand = rl ? f.t0+rl[1] : land0;
+  let T=tLand-tTake, method='parábola';
+
+  // Control cruzado: tiempo por encima del 12 % de la altura máxima
+  const lvl=0.12*peak;
+  let a1=i1; while(a1>0&&up[a1-1]>lvl) a1--;
+  let a2=i2; while(a2<n-1&&up[a2+1]>lvl) a2++;
+  let Tc=null;
+  if(a1>0 && a2<n-1){
+    const c1=t[a1-1]+(lvl-up[a1-1])/(up[a1]-up[a1-1])*(t[a1]-t[a1-1]);
+    const c2=t[a2]+(lvl-up[a2])/(up[a2+1]-up[a2])*(t[a2+1]-t[a2]);
+    Tc=(c2-c1)/Math.sqrt(1-0.12); // corregido a nivel de suelo asumiendo trayectoria parabólica
+    if(!(T>=Tc*0.9 && T<=Tc*1.2)){ T=Tc; method='umbral'; }
+  }
+  if(!(T>0)) return {error:'No se pudo calcular el tiempo de vuelo.', G0, bodyPx};
+  if(T>1.0) return {error:`El vuelo medido dura ${T.toFixed(2)} s, demasiado para un salto. Si el vídeo está en cámara lenta, elige el factor en «Vídeo subido».`, tooLong:T, G0, bodyPx};
+  if(T<0.15) return {error:'El vuelo detectado es demasiado corto para ser un salto. Repite con el cuerpo entero en plano.', G0, bodyPx};
+
+  const h=GRAV*T*T/8*100;
+  const pxPerCm = heightCm ? bodyPx/heightCm : null;
+  const hDisp = pxPerCm ? peak/pxPerCm : null;
+  const scaleRatio = heightCm ? ((2*Math.abs(f.a)/GRAV)/(bodyPx/(heightCm/100))) : null;
+  return {
+    flight:T, h, method, fps:1/dt, dt, precision:h*2*dt/T, fitN:idx.length, rmsRel:rms/peak,
+    takeoff:tTake, landing:tLand, tcross:Tc, G0, gPre, gPost, bodyPx, peak, hDisp, pxPerCm, scaleRatio,
+    series:{t, up}
+  };
+}
+// </detect>
+
+// ---------- Datos ----------
+const KEY='cmj_fatiga_v1';
+const DEF={athletes:[],current:null,settings:{amber:5,red:10,model:'full',cpu:false}};
+let db; try{ db=JSON.parse(localStorage.getItem(KEY)) || structuredClone(DEF); }catch{ db=structuredClone(DEF); }
+db.settings=Object.assign({}, DEF.settings, db.settings||{});
+const save=()=>{ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch{} };
+const uid=()=>Math.random().toString(36).slice(2,10);
+const cur=()=>db.athletes.find(a=>a.id===db.current)||null;
+const dayKey=ts=>new Date(ts).toLocaleDateString('sv-SE');
+
+function sessionBests(a){
+  const m={};
+  for(const j of a.jumps){ const k=dayKey(j.ts); m[k]=Math.max(m[k]||0, j.h); }
+  return Object.entries(m).sort((x,y)=>x[0].localeCompare(y[0]));
+}
+function baseline(a, today){
+  const prior=sessionBests(a).filter(([k])=>k<today).slice(-8).map(e=>e[1]);
+  if(prior.length<3) return {n:prior.length, value:null};
+  const top=[...prior].sort((x,y)=>y-x).slice(0,3);
+  return {n:prior.length, value:top.reduce((s,v)=>s+v,0)/3};
+}
+
+// ---------- Estado, errores y diagnóstico ----------
+const diagInfo={stage:'inicio', passes:[], video:{}, model:''};
+const setStage=s=>{ diagInfo.stage=s; };
+const status=m=>{ $('#status').textContent=m; };
+let lastErrText='';
+function diagText(err){
+  return JSON.stringify({when:new Date().toISOString(), ua:navigator.userAgent, secureContext:window.isSecureContext,
+    stage:diagInfo.stage, error:err?(err.stack||String(err)):null, video:diagInfo.video, passes:diagInfo.passes,
+    model:diagInfo.model, settings:db.settings},null,2);
+}
+function showError(title,msg,err){
+  $('#errTitle').textContent=title; $('#errMsg').textContent=msg; lastErrText=diagText(err);
+  $('#errBox').classList.remove('hidden');
+}
+const clearError=()=>$('#errBox').classList.add('hidden');
+$('#errClose').onclick=clearError;
+$('#errCopy').onclick=async()=>{
+  try{ await navigator.clipboard.writeText(lastErrText); status('Diagnóstico copiado: pégalo en el chat.'); }
+  catch{ const ta=document.createElement('textarea'); ta.value=lastErrText; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch{} ta.remove(); status('Diagnóstico copiado: pégalo en el chat.'); }
+};
+window.addEventListener('error',e=>showError('Error inesperado', e.message||'Error', e.error));
+window.addEventListener('unhandledrejection',e=>showError('Error inesperado', String(e.reason&&e.reason.message||e.reason), e.reason));
+
+// ---------- Atletas ----------
+function renderAthletes(){
+  const sel=$('#athlete'); sel.innerHTML='';
+  if(!db.athletes.length){ sel.innerHTML='<option value="">— Crea un atleta —</option>'; }
+  db.athletes.forEach(a=>{ const o=document.createElement('option'); o.value=a.id; o.textContent=a.name; sel.appendChild(o); });
+  if(!cur() && db.athletes.length) db.current=db.athletes[0].id;
+  if(cur()) sel.value=db.current;
+  const a=cur();
+  $('#athleteInfo').textContent = a ? (a.heightCm ? `Altura: ${a.heightCm} cm · ` : 'Sin altura (el control por desplazamiento no estará disponible) · ')+`${a.jumps.length} intentos guardados` : 'Añade un atleta para empezar.';
+  $('#rec').disabled = !(a && stream) || busy;
+  $('#uploadBtn').disabled = !a || busy;
+  renderFatigue(); renderTable();
+}
+$('#athlete').onchange=e=>{ db.current=e.target.value; save(); renderAthletes(); };
+$('#addAthlete').onclick=()=>{
+  const name=(prompt('Nombre del atleta')||'').trim(); if(!name) return;
+  const h=parseFloat((prompt('Altura en cm (opcional, mejora el control de calidad)')||'').replace(',','.'));
+  const a={id:uid(), name, heightCm:(h>100&&h<240)?h:null, jumps:[]};
+  db.athletes.push(a); db.current=a.id; save(); renderAthletes();
+};
+$('#editAthlete').onclick=()=>{
+  const a=cur(); if(!a) return;
+  const name=(prompt('Nombre', a.name)||'').trim(); if(!name) return;
+  const h=parseFloat((prompt('Altura en cm (vacío = ninguna)', a.heightCm||'')||'').replace(',','.'));
+  a.name=name; a.heightCm=(h>100&&h<240)?h:null; save(); renderAthletes();
+};
+$('#delAthlete').onclick=()=>{
+  const a=cur(); if(!a) return;
+  if(!confirm(`¿Borrar a ${a.name} y todo su historial?`)) return;
+  db.athletes=db.athletes.filter(x=>x!==a); db.current=db.athletes[0]?.id||null; save(); renderAthletes();
+};
+
+// ---------- Cámara y grabación ----------
+let stream=null, recorder=null, chunks=[], recording=false, autoStop=null, busy=false;
+
+async function startCam(){
+  clearError();
+  if(!navigator.mediaDevices?.getUserMedia){ showError('Cámara no disponible','Este navegador no permite usar la cámara aquí (hace falta HTTPS o localhost). Puedes grabar con la app de cámara del móvil y usar «Subir vídeo».'); return; }
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  try{
+    const sel=$('#facing').value;
+    const video={width:{ideal:1280}, height:{ideal:720}, frameRate:{ideal:+$('#fpsWanted').value}};
+    if(sel.startsWith('dev:')) video.deviceId={exact:sel.slice(4)}; else video.facingMode={ideal:sel};
+    stream=await navigator.mediaDevices.getUserMedia({audio:false, video});
+  }catch(e){
+    const hum=e.name==='NotAllowedError'?'Has denegado el permiso de cámara: actívalo en el candado de la barra de direcciones y vuelve a pulsar «Activar cámara».'
+      : e.name==='NotReadableError'?'La cámara la está usando otra aplicación (Zoom, Teams, otra pestaña…). Ciérrala e inténtalo de nuevo.'
+      : (e.name==='NotFoundError'||e.name==='OverconstrainedError')?'No se encontró esa cámara o no admite esa resolución. Elige otra en la lista o prueba con 30 fps.'
+      : e.message;
+    stream=null; renderAthletes(); showError('No se pudo abrir la cámara', hum, e); return;
+  }
+  const v=$('#cam'); v.srcObject=stream; await v.play().catch(()=>{});
+  showLive();
+  await populateCams();
+  const s=stream.getVideoTracks()[0].getSettings();
+  const fps=Math.round(s.frameRate||0);
+  status(`Cámara activa: ${s.width}×${s.height} a ${fps} fps. Colócate de perfil y pulsa «Grabar».`+(fps&&fps<50?' Con ~30 fps la precisión baja (unos ±3–5 cm); para más precisión graba a 120/240 fps con el móvil y usa «Subir vídeo».':''));
+  renderAthletes();
+}
+// Lista las cámaras del equipo (webcam integrada, USB, móvil conectado…) una vez concedido el permiso
+async function populateCams(){
+  try{
+    const sel=$('#facing'), keep=sel.value;
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    [...sel.querySelectorAll('option[data-dev]')].forEach(o=>o.remove());
+    devs.forEach((d,i)=>{ const o=document.createElement('option'); o.value='dev:'+d.deviceId; o.dataset.dev='1'; o.textContent='Cámara: '+(d.label||('cámara '+(i+1))); sel.appendChild(o); });
+    sel.value=keep;
+    if(![...sel.options].some(o=>o.value===sel.value)) sel.value='user';
+  }catch{}
+}
+// En ordenador, por defecto la webcam
+if(!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) $('#facing').value='user';
+function showLive(){ $('#stagePlay').classList.remove('show'); $('#stageLive').classList.add('show'); }
+$('#startCam').onclick=startCam;
+// Cambiar de cámara o de fps con la cámara ya activa: se reinicia sola (salvo mientras graba o analiza)
+['facing','fpsWanted'].forEach(id=>$('#'+id).addEventListener('change',()=>{ if(stream&&!recording&&!busy) startCam(); }));
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange',()=>{ if(stream) populateCams(); });
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function beep(f=880,d=120){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(); o.frequency.value=f; o.connect(c.destination); o.start(); setTimeout(()=>{o.stop();c.close();},d);}catch{} }
+
+$('#rec').onclick=async()=>{
+  if(recording){ recorder.stop(); return; }
+  if(!stream||!cur()||busy) return;
+  clearError(); showLive();
+  $('#rec').disabled=true;
+  for(const n of [3,2,1]){ $('#count').style.display='flex'; $('#count').textContent=n; beep(660,80); await sleep(1000); }
+  $('#count').style.display='none'; beep(1100,200);
+  const mime=['video/mp4;codecs=avc1','video/webm;codecs=vp8','video/webm;codecs=vp9','video/webm','video/mp4'].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t))||'';
+  chunks=[];
+  try{
+    recorder=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:10_000_000}:{});
+  }catch(e){ showError('No se pudo grabar','Este navegador no permite grabar vídeo desde la cámara. Usa «Subir vídeo».',e); $('#rec').disabled=false; return; }
+  recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+  recorder.onstop=()=>{
+    recording=false; $('#rec').textContent='● Grabar salto'; $('#rec').classList.add('primary');
+    clearTimeout(autoStop);
+    const blob=new Blob(chunks,{type:recorder.mimeType||'video/webm'});
+    diagInfo.video={recorded:true, mime:recorder.mimeType, bytes:blob.size};
+    if(!blob.size){ showError('Grabación vacía','No se grabó nada. Prueba otra vez o usa «Subir vídeo».'); renderAthletes(); return; }
+    analyze(URL.createObjectURL(blob), {timeScale:1});
+  };
+  recorder.start(); recording=true;
+  $('#rec').disabled=false; $('#rec').textContent='■ Parar (tras caer y quedarte quieto)'; $('#rec').classList.remove('primary');
+  status('Grabando… haz el salto y pulsa «Parar» un segundo después de caer.');
+  autoStop=setTimeout(()=>{ if(recording) recorder.stop(); },15000);
+};
+
+$('#uploadBtn').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  diagInfo.video={uploaded:true, name:f.name, type:f.type, bytes:f.size};
+  analyze(URL.createObjectURL(f), {timeScale:1/(+$('#slowmo').value||1)});
+};
+
+// ---------- Modelo de pose ----------
+let landmarker=null, loadedModel=null, mpMod=null, mpBase='', mpFiles=null, tsBase=0, lastTs=0;
+async function ensureModel(forceCpu=false){
+  if(window.__fakeLandmarker){ landmarker=window.__fakeLandmarker; loadedModel='fake'; return; } // pruebas
+  const want=db.settings.model;
+  if(landmarker && loadedModel===want && !forceCpu) return;
+  if(landmarker){ try{ landmarker.close(); }catch{} landmarker=null; }
+  setStage('libreria'); status('Cargando librería de pose…');
+  if(!mpMod){
+    let lastE=null;
+    for(const b of ['https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14','https://unpkg.com/@mediapipe/tasks-vision@0.10.14']){
+      try{ mpMod=await import(b+'/vision_bundle.mjs'); mpBase=b; break; }catch(e){ lastE=e; }
+    }
+    if(!mpMod) throw lastE||new Error('import fallido');
+  }
+  if(!mpFiles) mpFiles=await mpMod.FilesetResolver.forVisionTasks(mpBase+'/wasm');
+  setStage('modelo'); status('Descargando el modelo de pose (solo la primera vez)…');
+  const url=`https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${want}/float16/1/pose_landmarker_${want}.task`;
+  const mk=delegate=>mpMod.PoseLandmarker.createFromOptions(mpFiles,{
+    baseOptions:{modelAssetPath:url, delegate}, runningMode:'VIDEO', numPoses:1,
+    minPoseDetectionConfidence:0.4, minPosePresenceConfidence:0.4, minTrackingConfidence:0.4
+  });
+  let delegate='CPU';
+  if(forceCpu||db.settings.cpu){ landmarker=await mk('CPU'); }
+  else{ try{ landmarker=await mk('GPU'); delegate='GPU'; }catch{ landmarker=await mk('CPU'); } }
+  loadedModel=want; tsBase=0; lastTs=0; diagInfo.model=want+'/'+delegate;
+}
+
+// ---------- Análisis ----------
+const FEET=[29,30,31,32];
+const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+
+// Reproduce el vídeo y analiza cada fotograma que se presenta.
+// opts.snap: guardar miniaturas (para la revisión); opts.from/to: tramo del vídeo (s de vídeo).
+function runPass(v, rate, timeScale, opts={}){
+  return new Promise(resolve=>{
+    const S=[], frames=[], mts=[], pfs=[], detTimes=[];
+    let lastMT=-1, done=false, detErrors=0, lastErr=null, lastActivity=performance.now();
+    const cv=$('#overlay'), ctx=cv.getContext('2d');
+    cv.width=v.videoWidth; cv.height=v.videoHeight;
+    const vh=v.videoHeight, vw=v.videoWidth;
+    const SW=360, SH=Math.max(2,Math.round(SW*vh/vw));
+    const sc=document.createElement('canvas'); sc.width=SW; sc.height=SH; const sctx=sc.getContext('2d');
+    let wd=null, q0=null;
+    const vqn=()=>{ try{ return v.getVideoPlaybackQuality().totalVideoFrames; }catch{ return null; } };
+    const finish=why=>{
+      if(done) return; done=true; clearInterval(wd); v.onended=null; v.onerror=null;
+      try{ v.pause(); }catch{}
+      ctx.clearRect(0,0,cv.width,cv.height); tsBase=lastTs+1000;
+      const dt=detTimes.length>6?detTimes.slice(3):detTimes;   // sin el calentamiento del modelo
+      const q1=vqn();
+      resolve({S, frames, mts, pfs, vh, vw, detErrors, lastErr, nFrames:mts.length, timeScale, reason:why,
+        vq:(q0!=null&&q1!=null&&mts.length>1)?{n:q1-q0, mt0:mts[0], mt1:mts[mts.length-1]}:null,
+        detAvg: dt.length?mean(dt):30});
+    };
+    const cb=(now,meta)=>{
+      if(done) return;
+      lastActivity=performance.now();
+      const mt=meta.mediaTime;
+      if(opts.to!=null && mt>opts.to){ finish('window-end'); return; }
+      if(mt!==lastMT){
+        lastMT=mt; mts.push(mt); pfs.push(meta.presentedFrames);
+        const rec={t:mt*timeScale, blob:null};
+        if(opts.snap){
+          frames.push(rec);
+          if(frames.length<=4000){ try{ sctx.drawImage(v,0,0,SW,SH); sc.toBlob(b=>{ rec.blob=b; },'image/jpeg',0.6); }catch{} }
+        }
+        let ts=Math.round(tsBase+mt*1000); if(ts<=lastTs) ts=lastTs+1; lastTs=ts;
+        window.__mt=mt;
+        const t0=performance.now();
+        let res=null; try{ res=landmarker.detectForVideo(v,ts); }catch(e){ detErrors++; lastErr=e; }
+        detTimes.push(performance.now()-t0);
+        ctx.clearRect(0,0,cv.width,cv.height);
+        const lm=res&&res.landmarks&&res.landmarks[0];
+        if(lm){
+          let sw=0, sy=0; const pts=[];
+          for(const i of FEET){ const p=lm[i]; if(!p) continue; const w=(p.visibility==null?1:p.visibility); if(w>0.25){ sw+=w; sy+=w*p.y; pts.push(p); } }
+          if(sw>0){
+            const y=sy/sw*vh;
+            S.push({t:mt*timeScale, y, nose:lm[0].y*vh});
+            ctx.fillStyle='#22d3ee'; const rd=Math.max(4,vh/150);
+            pts.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x*cv.width,p.y*vh,rd,0,7); ctx.fill(); });
+            ctx.fillStyle='#fbbf24'; ctx.beginPath(); ctx.arc(lm[0].x*cv.width,lm[0].y*vh,rd,0,7); ctx.fill();
+          }
+        }
+        if(mts.length%4===0){
+          const tot=isFinite(v.duration)&&v.duration>0?v.duration:null;
+          status(opts.label+(tot?` ${Math.min(99,Math.round(mt/tot*100))}%`:` ${mts.length} fotogramas`)+(rate<1?` (cámara lenta ×${rate.toFixed(2)})`:''));
+        }
+        lastActivity=performance.now();
+        if(detErrors>=5 && S.length===0){ finish('detect-error'); return; }
+      }
+      v.requestVideoFrameCallback(cb);
+    };
+    // Seguro anti-bloqueo: solo salta si pasan muchos segundos sin ninguna actividad
+    wd=setInterval(()=>{ if(performance.now()-lastActivity>(mts.length?15000:60000)) finish('timeout'); },1000);
+    v.onended=()=>finish('ended');
+    v.onerror=()=>finish('media-error');
+    (async()=>{
+      v.playbackRate=rate;
+      try{ v.currentTime=opts.from||0; }catch{}
+      if((opts.from||0)>0.3){
+        await new Promise(res=>{ const to=setTimeout(res,4000); v.addEventListener('seeked',()=>{ clearTimeout(to); res(); },{once:true}); });
+      }
+      lastActivity=performance.now(); q0=vqn();
+      v.requestVideoFrameCallback(cb);
+      v.play().catch(()=>finish('play-blocked'));
+    })();
+  });
+}
+// Localiza de forma aproximada el salto a partir de la pasada rápida (muestras escasas)
+function coarseWindow(S, vh){
+  if(S.length<15) return null;
+  const y=median5(S.map(s=>s.y)), G0=percentile(y,0.9), up=y.map(v=>G0-v);
+  let k=0; for(let i=1;i<up.length;i++) if(up[i]>up[k]) k=i;
+  const peak=up[k];
+  if(peak<0.02*vh) return {none:true};
+  let i1=k,i2=k; while(i1>0&&up[i1-1]>0.1*peak) i1--; while(i2<up.length-1&&up[i2+1]>0.1*peak) i2++;
+  const t=S.map(s=>s.t);
+  return {none:false, t0:Math.max(0,t[Math.max(0,i1-1)]-1.3), t1:t[Math.min(up.length-1,i2+1)]+1.2};
+}
+// ¿Se saltaron fotogramas (sobre todo alrededor del salto)? Se usa el contador de fotogramas
+// presentados del navegador: si entre dos análisis pasaron 2 o más, se perdió alguno.
+function skipInfo(r, det){
+  const m=r.mts, pf=r.pfs;
+  if(m.length<5) return {bad:false, dtNom:0.033, frac:0};
+  const havePf=pf.every(x=>typeof x==='number');
+  const d=[], per=[];
+  for(let i=1;i<m.length;i++){
+    const n=havePf?Math.max(1,pf[i]-pf[i-1]):1;
+    d.push(n); per.push((m[i]-m[i-1])/n);
+  }
+  let dtNom=havePf?percentile(per,0.5):percentile(per,0.25);
+  // Si el navegador no pudo mostrar todos los fotogramas, el contador de fotogramas decodificados da el periodo real
+  if(r.vq && r.vq.n>30 && (r.vq.mt1-r.vq.mt0)>0.3) dtNom=Math.min(dtNom,(r.vq.mt1-r.vq.mt0)/r.vq.n);
+  const hasJump=det&&!det.error;
+  const lo=hasJump?(det.takeoff-0.25)/r.timeScale:-Infinity, hi=hasJump?(det.landing+0.25)/r.timeScale:Infinity;
+  let tot=0,bad=0;
+  for(let i=1;i<m.length;i++){
+    if(m[i]<lo||m[i]>hi) continue; tot++;
+    if(havePf ? d[i-1]>1 : (m[i]-m[i-1])>1.7*dtNom) bad++;
+  }
+  const frac=tot?bad/tot:0;
+  return {dtNom, frac, bad: frac>(hasJump?0.02:0.08)};
+}
+
+// Calienta el modelo sobre el primer fotograma (la primera inferencia compila shaders y puede tardar segundos)
+// y devuelve lo que tarda una inferencia normal, en ms.
+async function warmUp(v){
+  try{ v.currentTime=0; }catch{}
+  if(v.readyState<2) await new Promise(res=>{ const to=setTimeout(res,3000); v.addEventListener('loadeddata',()=>{ clearTimeout(to); res(); },{once:true}); });
+  const ms=[]; window.__mt=0;
+  for(let i=0;i<5;i++){
+    lastTs+=1; const t0=performance.now();
+    try{ landmarker.detectForVideo(v,lastTs); }catch{}
+    ms.push(performance.now()-t0);
+  }
+  tsBase=lastTs+1000;
+  ms.shift(); ms.sort((a,b)=>a-b);
+  return ms[ms.length>>1];
+}
+
+let an=null, curUrl=null;
+async function analyze(url, {timeScale=1}={}){
+  const a=cur(); if(!a||busy){ return; }
+  busy=true; clearError(); renderAthletes(); $('#resultSec').classList.add('hidden'); an=null;
+  try{
+    if(!('requestVideoFrameCallback' in HTMLVideoElement.prototype)){
+      throw Object.assign(new Error('requestVideoFrameCallback no disponible'),{human:'Este navegador es demasiado antiguo para el análisis fotograma a fotograma. Usa Chrome o Safari actualizados.'});
+    }
+    await ensureModel();
+    setStage('video');
+    const v=$('#play'); v.muted=true; v.playsInline=true;
+    await new Promise((res,rej)=>{
+      v.onloadedmetadata=res;
+      v.onerror=()=>rej(new Error('media error code '+(v.error&&v.error.code)));
+      if(curUrl) URL.revokeObjectURL(curUrl); curUrl=url; v.src=url;
+    });
+    v.onloadedmetadata=null; v.onerror=null;
+    diagInfo.video=Object.assign(diagInfo.video||{}, {w:v.videoWidth,h:v.videoHeight,duration:v.duration,timeScale});
+    if(!v.videoWidth) throw new Error('El vídeo no tiene dimensiones (códec no compatible)');
+    $('#stageLive').classList.remove('show'); $('#stagePlay').classList.add('show');
+
+    setStage('analisis'); diagInfo.passes=[];
+    let cpuTried=false;
+    const passFB=async(rate,opts)=>{
+      for(let k=0;k<2;k++){
+        const r=await runPass(v, rate, timeScale, opts);
+        diagInfo.passes.push({label:opts.label, rate:+rate.toFixed(3), from:opts.from, to:opts.to, samples:r.S.length, frames:r.nFrames, detErrors:r.detErrors, detMs:Math.round(r.detAvg), reason:r.reason, err:r.lastErr&&String(r.lastErr.message||r.lastErr)});
+        if(r.detErrors>=5 && r.S.length===0 && !cpuTried && loadedModel!=='fake'){
+          cpuTried=true; db.settings.cpu=true; save(); syncSettings();
+          status('La aceleración por GPU ha fallado; cambiando a CPU…');
+          await ensureModel(true); setStage('analisis'); continue;
+        }
+        if(r.detErrors>=5 && r.S.length===0) throw new Error('El modelo de pose falló en todos los fotogramas: '+(r.lastErr&&r.lastErr.message));
+        return r;
+      }
+    };
+    // 1) pasada rápida: localiza el salto y mide lo que tarda el modelo
+    // El modelo tarda en arrancar en la primera inferencia y luego cada fotograma cuesta lo que cueste en este dispositivo:
+    // se calienta antes y la velocidad de búsqueda se ajusta para muestrear >=15 veces por segundo de vídeo.
+    status('Preparando el análisis…');
+    const wu=await warmUp(v);
+    diagInfo.warmMs=Math.round(wu);
+    let scanRate=Math.max(0.0625,Math.min(1,0.06/((wu+15)/1000)));
+    let c, cw, sk0;
+    for(let k=0;k<3;k++){
+      c=await passFB(scanRate,{snap:false,label:'Buscando el salto…'});
+      cw=coarseWindow(c.S,c.vh); sk0=skipInfo(c,null);
+      const gaps=[]; for(let i=1;i<c.mts.length;i++) gaps.push((c.mts[i]-c.mts[i-1])*timeScale);
+      c.gap=gaps.length?percentile(gaps,0.75):1;
+      diagInfo.passes[diagInfo.passes.length-1].gap=+c.gap.toFixed(3);
+      if(c.gap<=0.09 || scanRate<=0.07) break;
+      scanRate=Math.max(0.0625,scanRate*0.09/c.gap*0.8);
+      status('Pocos fotogramas analizados; repitiendo la búsqueda más despacio…');
+    }
+    // la pantalla (~60 Hz) no puede presentar más de ~48 fotogramas/s: ese es el tope de la cámara lenta
+    let rate=Math.max(0.0625,Math.min(1, sk0.dtNom/(1.7*Math.max(0.005,(c.detAvg+15)/1000)), 48*sk0.dtNom));
+    let from=0, to=null, best=null;
+    if(cw&&cw.none&&c.S.length>=20&&c.gap>0.09){
+      setStage('deteccion');
+      best={r:c, det:{error:'Este dispositivo analiza demasiado despacio para localizar el salto (menos de ~11 fotogramas analizados por segundo de vídeo). Cierra otras pestañas, elige el modelo «Ligero» en Ajustes o analiza el vídeo en un ordenador.'}, sk:{frac:0}};
+    }else if(cw&&cw.none&&c.S.length>=20){
+      setStage('deteccion');
+      best={r:c, det:{error:'No se aprecia ningún despegue: los pies no se separan del suelo en el vídeo. Comprueba que se ven los pies y que el salto está dentro del vídeo.'}, sk:{frac:0}};
+    }else{
+      if(cw&&!cw.none){ from=cw.t0/timeScale; to=cw.t1/timeScale; }
+      // 2) pasada lenta y completa solo alrededor del salto
+      for(let pass=0; pass<3; pass++){
+        const r=await passFB(rate,{snap:true,from,to,label:'Analizando el salto…'});
+        setStage('deteccion');
+        const det=detectJump(r.S, r.vh, a.heightCm);
+        const sk=skipInfo(r, det);
+        best={r,det,sk};
+        if(sk.bad && rate>0.07 && pass<2){
+          rate=Math.max(0.0625, rate*0.6);
+          status(`Se saltaron fotogramas; repitiendo más despacio (×${rate.toFixed(2)})…`); setStage('analisis');
+          continue;
+        }
+        break;
+      }
+    }
+    showResult(best, timeScale);
+  }catch(e){
+    const hum={libreria:'No se pudo descargar la librería de detección de pose. Hace falta conexión a internet la primera vez (o la red bloquea cdn.jsdelivr.net/unpkg.com).',
+      modelo:'No se pudo descargar o iniciar el modelo de pose (necesita conexión a storage.googleapis.com la primera vez).',
+      video:'El navegador no puede reproducir este vídeo (códec no compatible). Prueba a grabar de nuevo o a subir un vídeo en MP4 (H.264).',
+      analisis:'Falló el análisis de los fotogramas.', deteccion:'Falló el cálculo del salto.'};
+    showError('No se pudo analizar el vídeo', (e.human||hum[diagInfo.stage]||'Error inesperado.')+' ('+(e.message||e)+')', e);
+    status('');
+  }finally{
+    busy=false; renderAthletes();
+  }
+}
+
+// ---------- Resultado y revisión ----------
+function showResult({r,det,sk}, timeScale){
+  const sec=$('#resultSec'); sec.classList.remove('hidden');
+  $('#reviewBox').classList.add('hidden');
+  if(det.error){
+    an=null; $('#rH').textContent='Sin resultado'; $('#rMethod').textContent='';
+    ['rT','rP','rF','rD'].forEach(i=>$('#'+i).textContent='–');
+    $('#rWarn').textContent=det.error; $('#saveJump').disabled=true;
+    status('Análisis terminado sin salto válido.'); drawTrace(null); return;
+  }
+  an={det, frames:r.frames, vh:r.vh, timeScale, skipFrac:sk.frac, final:{T:det.flight, h:det.h, method:'auto'}};
+  $('#saveJump').disabled=false;
+  const warns=[];
+  if(det.fps<50) warns.push('Menos de 50 fps reales: la resolución es baja. Graba a 60–240 fps y súbelo.');
+  if(sk.frac>0.02) warns.push('Se perdieron fotogramas alrededor del salto; revisa el vuelo fotograma a fotograma.');
+  if(det.method==='umbral') warns.push('La parábola no encajó bien con los datos; se usó un método alternativo menos preciso. Revisa fotograma a fotograma.');
+  if(det.rmsRel>0.06) warns.push('La detección de los pies es ruidosa (poca luz, ropa o fondo confuso). Revisa fotograma a fotograma.');
+  if(det.hDisp!=null && Math.abs(det.hDisp-det.h)/det.h>0.35) warns.push('El desplazamiento del pie no encaja con el tiempo de vuelo: comprueba que la cámara esté de perfil, quieta y con el cuerpo entero.');
+  if(det.scaleRatio!=null && (det.scaleRatio<0.7||det.scaleRatio>1.4)) warns.push('La escala del vídeo no es coherente con la altura del atleta: ¿cámara muy cerca/lejos o inclinada?');
+  if(det.h>75||det.h<5) warns.push('Altura fuera de lo habitual: comprueba el vídeo antes de guardar.');
+  $('#rWarn').textContent=warns.join(' ');
+  refreshResult();
+  status('Análisis terminado. Revisa el resultado y guarda el intento.');
+  initReview();
+}
+function refreshResult(){
+  const d=an.det, f=an.final;
+  $('#rH').textContent=f.h.toFixed(1)+' cm';
+  $('#rMethod').textContent=f.method==='manual'?'manual':'automático';
+  $('#rT').textContent=f.T.toFixed(3)+' s';
+  $('#rP').textContent='± '+(f.h*2*d.dt/f.T).toFixed(1)+' cm';
+  $('#rF').textContent=Math.round(d.fps);
+  $('#rD').textContent=d.hDisp!=null?d.hDisp.toFixed(1)+' cm':'sin altura';
+  const shade = f.method==='manual' ? [rv.list[rv.air].t, rv.list[rv.contact].t] : [d.takeoff, d.landing];
+  drawTrace(d, shade);
+}
+
+const rv={list:[], i:0, air:0, contact:0, token:0};
+function initReview(){
+  const box=$('#reviewBox');
+  const frs=an.frames.filter(f=>f.blob);
+  const lo=an.det.takeoff-0.30, hi=an.det.landing+0.30;
+  rv.list=frs.filter(f=>f.t>=lo&&f.t<=hi);
+  if(rv.list.length<6){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const first=t=>{ const j=rv.list.findIndex(f=>f.t>=t); return j<0?rv.list.length-1:j; };
+  rv.autoAir=first(an.det.takeoff); rv.autoContact=first(an.det.landing);
+  rv.air=rv.autoAir; rv.contact=rv.autoContact; rv.i=rv.air;
+  const sl=$('#rvSlider'); sl.max=rv.list.length-1; sl.value=rv.i;
+  drawReview(); updateMarks();
+}
+async function drawReview(){
+  if(!an||!rv.list.length) return;
+  const i=rv.i, f=rv.list[i], tok=++rv.token;
+  let bmp; try{ bmp=await createImageBitmap(f.blob); }catch{ return; }
+  if(tok!==rv.token){ if(bmp.close) bmp.close(); return; }
+  const cv=$('#rvCanvas'); cv.width=bmp.width; cv.height=bmp.height;
+  const c=cv.getContext('2d'); c.drawImage(bmp,0,0); if(bmp.close) bmp.close();
+  const gy=an.det.gPre/an.vh*cv.height;
+  c.strokeStyle='rgba(34,211,238,.95)'; c.lineWidth=2; c.setLineDash([8,5]);
+  c.beginPath(); c.moveTo(0,gy); c.lineTo(cv.width,gy); c.stroke(); c.setLineDash([]);
+  const tags=[]; if(i===rv.air) tags.push('DESPEGUE'); if(i===rv.contact) tags.push('CAÍDA');
+  if(tags.length){ c.fillStyle='rgba(220,38,38,.9)'; c.font='bold '+Math.round(cv.height/14)+'px system-ui'; c.fillText(tags.join(' + '),10,Math.round(cv.height/10)); }
+  $('#rvInfo').textContent=`Fotograma ${i+1}/${rv.list.length} · t = ${(f.t-rv.list[0].t).toFixed(3)} s`+(tags.length?' · '+tags.join(' + '):'');
+}
+function updateMarks(manualChange){
+  const ta=rv.list[rv.air].t, tc=rv.list[rv.contact].t, T=tc-ta;
+  $('#rvMarks').textContent=`Despegue: fotograma ${rv.air+1} · Caída: fotograma ${rv.contact+1} · vuelo entre marcas: ${T>0?T.toFixed(3)+' s':'—'}`;
+  if(!manualChange) return;
+  if(!(T>0.05)){ $('#rvMarks').textContent+=' (la caída debe ser posterior al despegue)'; return; }
+  an.final={T, h:GRAV*T*T/8*100, method:'manual'}; refreshResult();
+}
+const rvGo=i=>{ rv.i=Math.max(0,Math.min(rv.list.length-1,i)); $('#rvSlider').value=rv.i; drawReview(); };
+$('#rvSlider').oninput=e=>rvGo(+e.target.value);
+$('#rvPrev').onclick=()=>rvGo(rv.i-1);
+$('#rvNext').onclick=()=>rvGo(rv.i+1);
+$('#rvAir').onclick=()=>{ rv.air=rv.i; updateMarks(true); drawReview(); };
+$('#rvLand').onclick=()=>{ rv.contact=rv.i; updateMarks(true); drawReview(); };
+$('#rvAuto').onclick=()=>{
+  if(!an) return;
+  rv.air=rv.autoAir; rv.contact=rv.autoContact;
+  an.final={T:an.det.flight, h:an.det.h, method:'auto'}; updateMarks(false); refreshResult(); drawReview();
+};
+
+$('#discardJump').onclick=()=>{ an=null; rv.list=[]; $('#resultSec').classList.add('hidden'); status(''); };
+$('#saveJump').onclick=()=>{
+  const a=cur(); if(!a||!an) return;
+  a.jumps.push({id:uid(), ts:Date.now(), flight:+an.final.T.toFixed(4), h:+an.final.h.toFixed(2), fps:Math.round(an.det.fps), m:an.final.method});
+  an=null; rv.list=[]; save(); $('#resultSec').classList.add('hidden'); status('Intento guardado.'); renderAthletes();
+};
+
+// ---------- Fatiga ----------
+function renderFatigue(){
+  const a=cur(), box=$('#fatigue');
+  if(!a){ box.innerHTML='<div class="note">Sin atleta seleccionado.</div>'; drawHist(null,null); return; }
+  const today=dayKey(Date.now());
+  const todays=a.jumps.filter(j=>dayKey(j.ts)===today);
+  const bl=baseline(a,today);
+  let html='';
+  if(!todays.length){
+    html='<div class="note">Aún no hay saltos guardados hoy.</div>';
+  }else{
+    const best=Math.max(...todays.map(j=>j.h));
+    html=`<div class="grid">
+      <div class="stat"><b>${best.toFixed(1)} cm</b><span>Mejor salto hoy (${todays.length} int.)</span></div>
+      <div class="stat"><b>${bl.value?bl.value.toFixed(1)+' cm':'–'}</b><span>Línea base</span></div>`;
+    if(bl.value){
+      const d=(best-bl.value)/bl.value*100;
+      const {amber,red}=db.settings;
+      let col='var(--ok)', txt='Recuperado: sin señal de fatiga relevante.';
+      if(d<-red){ col='var(--bad)'; txt='Fatiga alta: conviene ajustar volumen e intensidad de la sesión.'; }
+      else if(d<-amber){ col='var(--warn)'; txt='Fatiga moderada: considera reducir algo la carga.'; }
+      html+=`<div class="stat"><b>${d>0?'+':''}${d.toFixed(1)} %</b><span>Frente a la línea base</span></div></div>
+        <div class="verdict"><span class="light" style="background:${col}"></span>${txt}</div>`;
+    }else{
+      html+=`</div><div class="note">Línea base en construcción: ${bl.n}/3 sesiones previas. Mide en días descansados para que sea representativa.</div>`;
+    }
+  }
+  box.innerHTML=html;
+  drawHist(a, bl.value);
+}
+
+// ---------- Gráficos ----------
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setupCanvas(cv){
+  const dpr=window.devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight;
+  cv.width=w*dpr; cv.height=h*dpr; const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,w,h);
+  return {c,w,h};
+}
+function drawXY(cv, xs, ys, o={}){
+  const {c,w,h}=setupCanvas(cv); const L=42,R=10,T=10,B=24;
+  if(!xs.length){ c.fillStyle=css('--muted'); c.font='13px system-ui'; c.fillText('Sin datos todavía',L,h/2); return; }
+  let x0=Math.min(...xs), x1=Math.max(...xs); if(x1===x0){ x0-=1; x1+=1; }
+  let y0=Math.min(...ys, o.hline??Infinity, 0), y1=Math.max(...ys, o.hline??-Infinity); if(y1===y0) y1=y0+1;
+  y1+=(y1-y0)*0.1;
+  const X=x=>L+(x-x0)/(x1-x0)*(w-L-R), Y=y=>T+(1-(y-y0)/(y1-y0))*(h-T-B);
+  c.strokeStyle=css('--line'); c.fillStyle=css('--muted'); c.font='11px system-ui'; c.lineWidth=1;
+  for(let k=0;k<=4;k++){ const v=y0+(y1-y0)*k/4, yy=Y(v); c.beginPath(); c.moveTo(L,yy); c.lineTo(w-R,yy); c.stroke(); c.fillText(v.toFixed(0),4,yy+4); }
+  if(o.shade){ c.fillStyle='rgba(76,141,255,.18)'; c.fillRect(X(o.shade[0]),T,X(o.shade[1])-X(o.shade[0]),h-T-B); }
+  if(o.hline!=null){ c.strokeStyle=css('--muted'); c.setLineDash([6,4]); c.beginPath(); c.moveTo(L,Y(o.hline)); c.lineTo(w-R,Y(o.hline)); c.stroke(); c.setLineDash([]); }
+  c.strokeStyle=css('--accent'); c.lineWidth=2; c.beginPath();
+  xs.forEach((x,i)=>{ i?c.lineTo(X(x),Y(ys[i])):c.moveTo(X(x),Y(ys[i])); }); c.stroke();
+  if(o.dots){ c.fillStyle=css('--accent'); xs.forEach((x,i)=>{ c.beginPath(); c.arc(X(x),Y(ys[i]),3.5,0,7); c.fill(); }); }
+  c.fillStyle=css('--muted'); c.fillText(o.xlabel||'',L,h-6);
+}
+function drawTrace(det, shade){
+  const cv=$('#trace');
+  if(!det){ drawXY(cv,[],[]); return; }
+  const s=det.series, k=det.pxPerCm||null, t0=s.t[0];
+  const xs=s.t.map(t=>t-t0), ys=s.up.map(u=>k?u/k:u);
+  const sh=shade||[det.takeoff,det.landing];
+  drawXY(cv,xs,ys,{shade:[sh[0]-t0,sh[1]-t0], xlabel:'tiempo (s)  ·  eje vertical: '+(k?'cm':'píxeles')});
+}
+function drawHist(a, base){
+  const cv=$('#hist');
+  if(!a){ drawXY(cv,[],[]); return; }
+  const s=sessionBests(a).slice(-20);
+  drawXY(cv, s.map((_,i)=>i), s.map(e=>e[1]), {hline:base??undefined, dots:true, xlabel:'sesiones recientes · altura (cm)'});
+}
+window.addEventListener('resize',()=>{ renderFatigue(); if(an) refreshResult(); });
+
+// ---------- Historial ----------
+function renderTable(){
+  const a=cur(), tb=$('#table tbody'); tb.innerHTML='';
+  if(!a) return;
+  [...a.jumps].reverse().slice(0,30).forEach(j=>{
+    const tr=document.createElement('tr'); const d=new Date(j.ts);
+    tr.innerHTML=`<td>${d.toLocaleDateString('es-ES')} ${d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</td><td>${j.h.toFixed(1)} cm${j.m==='manual'?' ✎':''}</td><td>${j.flight.toFixed(3)} s</td><td>${j.fps}</td><td></td>`;
+    const b=document.createElement('button'); b.textContent='✕'; b.title='Borrar intento';
+    b.onclick=()=>{ a.jumps=a.jumps.filter(x=>x!==j); save(); renderAthletes(); };
+    tr.lastElementChild.appendChild(b); tb.appendChild(tr);
+  });
+}
+function download(name, text, type){
+  const url=URL.createObjectURL(new Blob([text],{type})); const l=document.createElement('a'); l.href=url; l.download=name; l.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+$('#expCsv').onclick=()=>{
+  const rows=[['atleta','fecha','hora','altura_cm','vuelo_s','fps','metodo']];
+  db.athletes.forEach(a=>a.jumps.forEach(j=>{ const d=new Date(j.ts); rows.push([a.name,dayKey(j.ts),d.toLocaleTimeString('es-ES'),j.h,j.flight,j.fps,j.m||'auto']); }));
+  download('cmj.csv', rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n'), 'text/csv');
+};
+$('#expJson').onclick=()=>download('cmj-copia.json', JSON.stringify(db), 'application/json');
+$('#impJson').onclick=()=>$('#fileJson').click();
+$('#fileJson').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  try{ const d=JSON.parse(await f.text()); if(!Array.isArray(d.athletes)) throw 0;
+    if(!confirm('Esto reemplaza los datos actuales. ¿Continuar?')) return;
+    db=Object.assign(structuredClone(DEF), d); db.settings=Object.assign({}, DEF.settings, db.settings||{}); save(); renderAthletes(); syncSettings();
+  }catch{ alert('Archivo no válido.'); }
+};
+
+// ---------- Ajustes ----------
+function syncSettings(){ $('#setAmber').value=db.settings.amber; $('#setRed').value=db.settings.red; $('#setModel').value=db.settings.model; $('#setCpu').checked=!!db.settings.cpu; }
+['setAmber','setRed'].forEach(id=>$('#'+id).onchange=()=>{
+  const am=parseFloat($('#setAmber').value), rd=parseFloat($('#setRed').value);
+  if(am>0&&rd>am){ db.settings.amber=am; db.settings.red=rd; save(); renderFatigue(); } else { alert('El umbral rojo debe ser mayor que el amarillo.'); syncSettings(); }
+});
+$('#setModel').onchange=e=>{ db.settings.model=e.target.value; save(); };
+$('#setCpu').onchange=e=>{ db.settings.cpu=e.target.checked; save(); landmarker=null; };
+
+syncSettings(); renderAthletes();
+</script>
+</body>
+</html>
